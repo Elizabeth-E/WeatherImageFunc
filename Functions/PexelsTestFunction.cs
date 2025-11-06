@@ -1,7 +1,4 @@
 using System.Net;
-using System.Net.Http;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -13,12 +10,14 @@ public class PexelsTestFunction
 
     public PexelsTestFunction(IHttpClientFactory factory)
     {
+ 
         _http = factory.CreateClient();
-        _pexelsKey = Environment.GetEnvironmentVariable("PEXELS_API_KEY");
+        _pexelsKey = Environment.GetEnvironmentVariable("PEXELS_API_KEY") ?? throw new InvalidOperationException("PEXELS_API_KEY missing");
+
     }
 
     //function for testing how many calls are still allowed for Pexels API
-    [Function("TestPexels")]
+   [Function("TestPexels")]
     public async Task<HttpResponseData> Run(
         [HttpTrigger(AuthorizationLevel.Function, "get")] HttpRequestData req)
     {
@@ -39,4 +38,5 @@ public class PexelsTestFunction
         await response.WriteStringAsync(body);
         return response;
     }
+
 }

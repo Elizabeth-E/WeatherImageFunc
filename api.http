@@ -1,0 +1,19 @@
+
+### set this varible with jobId thats in the response from the jobs/start POST request
+@jobId = 29031f72d1324921848b4c3bdb9f97f0
+### Start a new weather image job
+POST http://localhost:7071/api/jobs/start
+Content-Type: application/json
+
+{
+  "requestedBy": "test"
+}
+
+### Check job status
+GET http://localhost:7071/api/jobs/{{jobId}}/status
+
+### Get generated images 
+GET http://localhost:7071/api/jobs/{{jobId}}/images
+
+### Check Pexels
+GET http://localhost:7071/api/TestPexels

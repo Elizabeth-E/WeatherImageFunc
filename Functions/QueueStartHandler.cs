@@ -34,13 +34,12 @@ namespace WeatherImageFunc.Functions
 
             var doc = JsonDocument.Parse(json);
 
-            // select first 50 stations
-            // TODO: make sure this is set to 50 before deploying to the cloud
+            // select 50 stations
             var stations = doc.RootElement
                 .GetProperty("actual")
                 .GetProperty("stationmeasurements")
                 .EnumerateArray()
-                .Take(15)
+                .Take(50)
                 .ToList();
 
             //gets info from buienradar api and outputs it to the queue to later be added to an image
@@ -66,6 +65,22 @@ namespace WeatherImageFunc.Functions
             .ToArray();
 
             _logger.LogInformation("Fan-out: Sending {0} messages to image-process queue", outputTasks.Length);
+
+            // INIT job status.json under the same container you use for images
+            string storageConn = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+            string containerName = Environment.GetEnvironmentVariable("OUTPUT_BLOB_CONTAINER") ?? "weather-images";
+            var statusContainer = new Azure.Storage.Blobs.BlobContainerClient(storageConn, containerName);
+            await statusContainer.CreateIfNotExistsAsync();
+
+            var statusBlob = statusContainer.GetBlobClient($"jobs/{jobId}/status.json");
+
+            // total = stations.Count; done = 0
+            var init = new JobStatus { Total = stations.Count, Done = 0 };
+            using (var ms = new MemoryStream(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(init)))
+            {
+                await statusBlob.UploadAsync(ms, overwrite: true);
+            }
+
 
             return outputTasks;
         }

@@ -1,4 +1,3 @@
-
 using System.Text.Json;
 using Azure.Storage.Blobs;
 using Microsoft.Azure.Functions.Worker;
@@ -29,7 +28,6 @@ namespace WeatherImageFunc.Functions
             var weatherDescription = msg.Description;
 
             //setting up cache to store images so weather with the same description goes on the same image.
-            //this is to limit eating up too much quota in Pexels API.
             string conn = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
             var cacheContainer = new BlobContainerClient(conn, "background-cache");
             await cacheContainer.CreateIfNotExistsAsync();
@@ -47,30 +45,44 @@ namespace WeatherImageFunc.Functions
             }
             else
             {
-            _logger.LogInformation($"CACHE MISS for '{weatherDescription}' downloading from Pexels");
+                _logger.LogInformation($"CACHE MISS for '{weatherDescription}' downloading from Pexels");
 
-            string pexelsKey = Environment.GetEnvironmentVariable("PEXELS_API_KEY");
+                string pexelsKey = Environment.GetEnvironmentVariable("PEXELS_API_KEY");
 
-            var req = new HttpRequestMessage(
-                HttpMethod.Get,
-                $"https://api.pexels.com/v1/search?query={Uri.EscapeDataString(weatherDescription)}&per_page=1"
-            );
-            req.Headers.Add("Authorization", pexelsKey);
+                var req = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"https://api.pexels.com/v1/search?query={Uri.EscapeDataString(weatherDescription)}&per_page=1"
+                );
+                req.Headers.Add("Authorization", pexelsKey);
 
-            var res = await _http.SendAsync(req);
-            res.EnsureSuccessStatusCode();
+                using var res = await _http.SendAsync(req);
+                res.EnsureSuccessStatusCode();
 
-            var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-            var photo = json.RootElement.GetProperty("photos")[0];
-            string url = photo.GetProperty("src").GetProperty("large").GetString();
+                var jsonText = await res.Content.ReadAsStringAsync();
+                using var json = JsonDocument.Parse(jsonText);
 
-            var bytes = await _http.GetByteArrayAsync(url);
+                if (!json.RootElement.TryGetProperty("photos", out var photos))
+                {
+                    _logger.LogError($"PEXELS: no 'photos' property. Body: {jsonText}");
+                    return;
+                }
 
-            // saves image for new weather description in the cache
-            using (var msUpload = new MemoryStream(bytes))
-                await cacheBlob.UploadAsync(msUpload, overwrite: true);
+                if (photos.GetArrayLength() == 0)
+                {
+                    _logger.LogWarning($"PEXELS returned 0 photos for '{weatherDescription}'");
+                    return;
+                }
 
-            imageStream = new MemoryStream(bytes);
+                var photo = photos[0];
+                string url = photo.GetProperty("src").GetProperty("large").GetString();
+
+                var bytes = await _http.GetByteArrayAsync(url);
+
+                // saves image for new weather description in the cache
+                using (var msUpload = new MemoryStream(bytes))
+                    await cacheBlob.UploadAsync(msUpload, overwrite: true);
+
+                imageStream = new MemoryStream(bytes);
             }
 
             // use imageStream as the image source
@@ -88,14 +100,14 @@ namespace WeatherImageFunc.Functions
 
             var fonts = new FontCollection();
             var family = fonts.Install(fontPath);
-            var font   = family.CreateFont(48);
+            var font = family.CreateFont(48);
 
-            image.Mutate(x => {
+            image.Mutate(x =>
+            {
                 x.DrawText(line1, font, Color.White, new PointF(40, 40));
                 x.DrawText(line2, font, Color.White, new PointF(40, 110));
                 x.DrawText(line3, font, Color.White, new PointF(40, 180));
             });
-
 
             // output onto the blob
             string storageConn = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
@@ -108,7 +120,8 @@ namespace WeatherImageFunc.Functions
             image.SaveAsPng(outStream);
             outStream.Position = 0;
 
-            await blob.UploadBlobAsync(blobName, outStream);
+            var blobClient = blob.GetBlobClient(blobName);
+            await blobClient.UploadAsync(outStream, overwrite: true);
 
             _logger.LogInformation($"image created: {blobName}");
         }
